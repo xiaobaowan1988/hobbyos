@@ -15,6 +15,7 @@
 #include "gic.h"
 #include "timer.h"
 #include "pci.h"
+#include "virtio.h"
 #include "proc.h"
 
 /* ==================================================================
@@ -68,7 +69,11 @@ void kernel_main(void)
     pci_init();
     uart_puts("\n");
 
-    /* 步骤 8: 初始化进程子系统 */
+    /* 步骤 8: 初始化 virtio-net 网卡 */
+    virtio_net_init();
+    uart_puts("\n");
+
+    /* 步骤 9: 初始化进程子系统 */
     proc_init();
     uart_puts("\n");
 

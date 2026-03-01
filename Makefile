@@ -78,7 +78,8 @@ C_SRC   := kernel/main.c \
            drivers/uart.c \
            drivers/gic.c \
            drivers/timer.c \
-           drivers/pci.c
+           drivers/pci.c \
+           drivers/virtio_net.c
 OBJ     := $(ASM_SRC:.S=.o) $(C_SRC:.c=.o)
 
 # -------------------------------------------------------------------
