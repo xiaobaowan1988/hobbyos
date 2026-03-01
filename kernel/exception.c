@@ -12,6 +12,8 @@
 
 #include "uart.h"
 #include "syscall.h"
+#include "gic.h"
+#include "timer.h"
 
 /* ==================================================================
  * 异常类型名称表
@@ -107,7 +109,45 @@ static void print_reg(const char *name, unsigned long val)
 void exception_handler(unsigned long type, unsigned long *frame)
 {
     /* ============================================================
-     * 快速路径: 检查是否为 SVC 系统调用 (来自 EL0 的同步异常)
+     * 快速路径 1: IRQ 中断处理
+     *
+     * type == 5 表示 "当前 EL, SP_ELx, IRQ" (内核态 IRQ)
+     * type == 9 表示 "低 EL, AArch64, IRQ" (用户态 IRQ)
+     *
+     * 处理流程:
+     *   1. 读取 GIC IAR 获取中断号
+     *   2. 根据中断号调用对应处理函数
+     *   3. 写入 GIC EOIR 完成中断
+     *
+     * 参考: [ARM-ARM] D1.10.2 "Exception vector offsets"
+     *        [GIC-SPEC] 4.4.4 "GICC_IAR"
+     * ============================================================ */
+    if (type == 5 || type == 9) {
+        uint32_t iar = gic_read_iar();     /* 读取并确认中断 */
+        uint32_t irq = iar & 0x3FF;        /* 提取中断号 (低 10 位) */
+
+        if (irq == 1023) {
+            /* 伪中断 (Spurious interrupt): 无需处理
+             * 参考: [GIC-SPEC] 4.4.4 "1023 = spurious" */
+            return;
+        }
+
+        /* 根据中断号分发到对应的处理函数 */
+        if (irq == TIMER_IRQ) {
+            timer_handler();               /* ARM 通用定时器中断 */
+        } else {
+            uart_puts("[irq] Unhandled IRQ: ");
+            uart_putc('0' + (irq / 10));
+            uart_putc('0' + (irq % 10));
+            uart_puts("\n");
+        }
+
+        gic_write_eoir(iar);               /* 写入 EOIR 完成中断 */
+        return;
+    }
+
+    /* ============================================================
+     * 快速路径 2: SVC 系统调用 (来自 EL0 的同步异常)
      *
      * type == 8 表示 "低 EL, AArch64, 同步异常"
      * ESR_EL1.EC == 0x15 表示 SVC 指令

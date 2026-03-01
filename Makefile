@@ -75,7 +75,9 @@ C_SRC   := kernel/main.c \
            kernel/syscall.c \
            kernel/string.c \
            user/user_prog.c \
-           drivers/uart.c
+           drivers/uart.c \
+           drivers/gic.c \
+           drivers/timer.c
 OBJ     := $(ASM_SRC:.S=.o) $(C_SRC:.c=.o)
 
 # -------------------------------------------------------------------

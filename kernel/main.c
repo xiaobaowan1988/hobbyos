@@ -12,6 +12,8 @@
 #include "uart.h"
 #include "mm.h"
 #include "mmu.h"
+#include "gic.h"
+#include "timer.h"
 #include "proc.h"
 
 /* ==================================================================
@@ -53,7 +55,15 @@ void kernel_main(void)
     mmu_init();
     uart_puts("\n");
 
-    /* 步骤 5: 初始化进程子系统 */
+    /* 步骤 5: 初始化 GIC 中断控制器 */
+    gic_init();
+    uart_puts("\n");
+
+    /* 步骤 6: 初始化 ARM 通用定时器 */
+    timer_init();
+    uart_puts("\n");
+
+    /* 步骤 7: 初始化进程子系统 */
     proc_init();
     uart_puts("\n");
 
