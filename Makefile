@@ -81,7 +81,10 @@ C_SRC   := kernel/main.c \
            drivers/pci.c \
            drivers/virtio_net.c \
            net/skbuff.c \
-           net/ethernet.c
+           net/ethernet.c \
+           net/ip.c \
+           net/udp.c \
+           net/tcp.c
 OBJ     := $(ASM_SRC:.S=.o) $(C_SRC:.c=.o)
 
 # -------------------------------------------------------------------
