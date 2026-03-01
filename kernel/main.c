@@ -11,6 +11,7 @@
 
 #include "uart.h"
 #include "mm.h"
+#include "mmu.h"
 
 /* ==================================================================
  * kernel_main() — 内核主函数
@@ -45,6 +46,10 @@ void kernel_main(void)
 
     /* 步骤 3: 初始化物理内存管理器 */
     pmm_init();
+    uart_puts("\n");
+
+    /* 步骤 4: 初始化 MMU (恒等映射 + 缓存) */
+    mmu_init();
 
     uart_puts("\n[boot] Kernel boot complete. Halting.\n");
 

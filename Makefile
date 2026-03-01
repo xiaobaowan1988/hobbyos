@@ -69,6 +69,7 @@ ASM_SRC := boot/start.S \
 C_SRC   := kernel/main.c \
            kernel/exception.c \
            kernel/pmm.c \
+           kernel/mmu.c \
            drivers/uart.c
 OBJ     := $(ASM_SRC:.S=.o) $(C_SRC:.c=.o)
 
