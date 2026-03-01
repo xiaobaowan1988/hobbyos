@@ -65,11 +65,13 @@ LDFLAGS := -T scripts/linker.ld -nostdlib
 # OBJ     — 所有目标文件 (从源文件自动推导)
 # -------------------------------------------------------------------
 ASM_SRC := boot/start.S \
-           boot/vectors.S
+           boot/vectors.S \
+           kernel/switch.S
 C_SRC   := kernel/main.c \
            kernel/exception.c \
            kernel/pmm.c \
            kernel/mmu.c \
+           kernel/proc.c \
            drivers/uart.c
 OBJ     := $(ASM_SRC:.S=.o) $(C_SRC:.c=.o)
 

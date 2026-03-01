@@ -12,6 +12,7 @@
 #include "uart.h"
 #include "mm.h"
 #include "mmu.h"
+#include "proc.h"
 
 /* ==================================================================
  * kernel_main() — 内核主函数
@@ -50,18 +51,16 @@ void kernel_main(void)
 
     /* 步骤 4: 初始化 MMU (恒等映射 + 缓存) */
     mmu_init();
+    uart_puts("\n");
 
-    uart_puts("\n[boot] Kernel boot complete. Halting.\n");
+    /* 步骤 5: 初始化进程子系统 */
+    proc_init();
 
-    /* 步骤 4: 内核主循环 — 当前无事可做, 进入无限循环。
-     * 使用 WFE (Wait For Event) 指令让 CPU 进入低功耗状态,
-     * 减少不必要的电力消耗。
-     * 参考: [ARM-ARM] C6.2.33 "WFE, Wait For Event" */
+    uart_puts("\n[boot] Kernel boot complete.\n");
+    uart_puts("[boot] No user process created yet (syscall framework needed first).\n");
+
+    /* 内核主循环 — 等待后续章节添加调度器调用 */
     while (1) {
-        /* ARM64 内联汇编: 执行 WFE 指令
-         * __asm__ — GCC 内联汇编关键字
-         * volatile — 防止编译器优化掉此指令
-         * 参考: GCC 手册 "6.47 How to Use Inline Assembly Language in C Code" */
         __asm__ volatile("wfe");
     }
 }
