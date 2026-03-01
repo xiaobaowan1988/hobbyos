@@ -55,11 +55,18 @@ void kernel_main(void)
 
     /* 步骤 5: 初始化进程子系统 */
     proc_init();
+    uart_puts("\n");
 
-    uart_puts("\n[boot] Kernel boot complete.\n");
-    uart_puts("[boot] No user process created yet (syscall framework needed first).\n");
+    /* 步骤 6: 创建用户态测试进程并调度运行 */
+    uart_puts("[boot] Creating user process...\n");
+    extern void user_entry(void);       /* user/user_prog.c 中定义 */
+    proc_create(user_entry);
 
-    /* 内核主循环 — 等待后续章节添加调度器调用 */
+    uart_puts("[boot] Scheduling first user process...\n\n");
+    schedule();
+
+    /* 如果 schedule 返回, 表示无更多进程可运行 */
+    uart_puts("\n[boot] All processes exited. Halting.\n");
     while (1) {
         __asm__ volatile("wfe");
     }

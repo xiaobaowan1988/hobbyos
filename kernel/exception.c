@@ -11,6 +11,7 @@
  */
 
 #include "uart.h"
+#include "syscall.h"
 
 /* ==================================================================
  * 异常类型名称表
@@ -105,6 +106,26 @@ static void print_reg(const char *name, unsigned long val)
  * ================================================================== */
 void exception_handler(unsigned long type, unsigned long *frame)
 {
+    /* ============================================================
+     * 快速路径: 检查是否为 SVC 系统调用 (来自 EL0 的同步异常)
+     *
+     * type == 8 表示 "低 EL, AArch64, 同步异常"
+     * ESR_EL1.EC == 0x15 表示 SVC 指令
+     *
+     * 参考: [ARM-ARM] D1.10.2 "Exception vector offsets"
+     *        [ARM-ARM] D13.2.36 "ESR_EL1" — EC=0x15
+     * ============================================================ */
+    if (type == 8) {
+        unsigned long esr;
+        __asm__ volatile("mrs %0, esr_el1" : "=r"(esr));
+        unsigned long ec = (esr >> 26) & 0x3F;
+        if (ec == 0x15) {
+            /* 这是一个系统调用! 交给 syscall_handler 处理 */
+            syscall_handler(frame);
+            return;  /* 正常返回, ERET 回到用户态 */
+        }
+    }
+
     /* 读取异常综合征寄存器 (ESR_EL1)
      *
      * ESR_EL1 包含异常的详细原因:

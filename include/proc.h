@@ -106,6 +106,9 @@ void switch_to(struct cpu_context *prev, struct cpu_context *next);
  *   sp — 用户态栈指针 */
 void ret_to_user(uint64_t pc, uint64_t sp);
 
+/* schedule() — 简单调度器, 选择下一个就绪进程运行 */
+void schedule(void);
+
 /* current_proc() — 获取当前运行的进程 PCB 指针 */
 struct proc *current_proc(void);
 
