@@ -25,6 +25,34 @@
 static struct virtio_net_dev net_dev;
 
 /* ==================================================================
+ * 静态 virtqueue 内存 — 确保物理连续且页对齐
+ *
+ * Legacy virtio 规范要求 virtqueue 的三个组件 (desc, avail, used)
+ * 位于从同一个基地址开始的连续物理内存中:
+ *   desc  @ base + 0
+ *   avail @ base + num × 16
+ *   used  @ base + ALIGN(num×16 + 4 + 2×num, 4096)
+ *
+ * 设备通过 QUEUE_ADDR = base/4096 定位所有组件。
+ *
+ * 对于 num=256:
+ *   desc  = 256 × 16 = 4096 bytes (1 page)
+ *   avail = 4 + 2 × 256 = 516 bytes
+ *   used_offset = ALIGN(4612, 4096) = 8192 (2 pages)
+ *   used  = 4 + 8 × 256 = 2052 bytes (1 page)
+ *   Total = 3 pages (12 KB)
+ *
+ * 使用静态数组确保连续, page_alloc() 无法保证连续性。
+ *
+ * 参考: [VIRTIO-SPEC] 2.6.2 "Legacy Interfaces: A Note on Virtqueue Layout"
+ * ================================================================== */
+#define VQ_MEM_PAGES  3     /* 每个 virtqueue 需要 3 个 4KB 页面 */
+#define VQ_MEM_SIZE   (VQ_MEM_PAGES * 4096)
+
+static uint8_t rx_vq_mem[VQ_MEM_SIZE] __attribute__((aligned(4096)));
+static uint8_t tx_vq_mem[VQ_MEM_SIZE] __attribute__((aligned(4096)));
+
+/* ==================================================================
  * MMIO 读写辅助函数
  *
  * virtio legacy 接口的寄存器通过 BAR0 的 MMIO 访问。
@@ -105,30 +133,33 @@ static void virtq_init(struct virtqueue *vq, uint16_t queue_idx)
     if (size > VIRTQ_SIZE) size = VIRTQ_SIZE;
     vq->num = size;
 
-    /* 步骤 3: 分配 virtqueue 内存
+    /* 步骤 3: 使用静态分配的 virtqueue 内存
      *
-     * Legacy 布局需要一块连续物理内存:
-     *   offset 0:    Descriptor Table (16 × num)
-     *   offset desc: Available Ring (6 + 2 × num)
-     *   对齐到 4096 后: Used Ring (6 + 8 × num)
+     * Legacy 布局 (从基地址 base 开始的连续物理内存):
+     *   base + 0:                          Descriptor Table (num × 16)
+     *   base + num×16:                     Available Ring (4 + 2×num)
+     *   base + ALIGN(num×16+4+2×num, 4096): Used Ring (4 + 8×num)
      *
-     * 简单起见分配 2 个 4KB 页面 (8KB, 足够 256 个描述符)。
+     * 设备通过 QUEUE_ADDR = base/4096 来定位所有组件。
+     * 必须使用物理连续内存, 因此使用静态数组 (在 BSS 段中)。
+     *
+     * 参考: [VIRTIO-SPEC] 2.6.2 "Legacy Interfaces: A Note on Virtqueue Layout"
+     */
+    uint8_t *base = (queue_idx == 0) ? rx_vq_mem : tx_vq_mem;
+
+    /* 清零整个 virtqueue 内存区域 */
+    memset(base, 0, VQ_MEM_SIZE);
+
+    /* 计算各组件偏移 (遵循 legacy 布局规则) */
+    uint32_t desc_offset  = 0;
+    uint32_t avail_offset = size * sizeof(struct virtq_desc);
+    /* Used ring 从下一个 4096 字节边界开始
      * 参考: [VIRTIO-SPEC] 2.6.2 */
-    uint64_t page1 = page_alloc();
-    uint64_t page2 = page_alloc();
-    if (page1 == 0 || page2 == 0) {
-        uart_puts("[virtio] Out of memory for virtqueue!\n");
-        return;
-    }
+    uint32_t used_offset  = (avail_offset + 4 + 2 * size + 4095) & ~4095U;
 
-    /* 清零内存 */
-    memset((void *)page1, 0, PAGE_SIZE);
-    memset((void *)page2, 0, PAGE_SIZE);
-
-    /* 设置各组件指针 */
-    vq->desc  = (struct virtq_desc *)page1;
-    vq->avail = (struct virtq_avail *)(page1 + size * sizeof(struct virtq_desc));
-    vq->used  = (struct virtq_used *)page2;
+    vq->desc  = (struct virtq_desc  *)(base + desc_offset);
+    vq->avail = (struct virtq_avail *)(base + avail_offset);
+    vq->used  = (struct virtq_used  *)(base + used_offset);
 
     /* 步骤 4: 初始化空闲描述符链表
      * 将所有描述符链成一个单链表, 方便分配。 */
@@ -140,11 +171,12 @@ static void virtq_init(struct virtqueue *vq, uint16_t queue_idx)
 
     /* 步骤 5: 告诉设备 virtqueue 的物理地址
      *
-     * Legacy 接口: QUEUE_ADDR = 物理地址 / 4096 (即页帧号)。
-     * 设备据此定位 descriptor table, available ring, used ring。
+     * Legacy 接口: QUEUE_ADDR = 物理地址 / 4096 (即页帧号 PFN)。
+     * 设备据此 PFN 计算 desc/avail/used 的位置。
+     * 由于使用恒等映射 (VA == PA), 虚拟地址即物理地址。
      *
      * 参考: [VIRTIO-SPEC] 4.1.4.3.4 "Queue Address" */
-    vio_write32(VIRTIO_REG_QUEUE_ADDR, (uint32_t)(page1 / PAGE_SIZE));
+    vio_write32(VIRTIO_REG_QUEUE_ADDR, (uint32_t)((uint64_t)base / PAGE_SIZE));
 }
 
 /* ==================================================================

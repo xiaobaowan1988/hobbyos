@@ -94,17 +94,37 @@ spin:
 2:
 
     /* ----------------------------------------------------------
-     * 设置栈指针 SP_EL1。
-     * _start 位于内核映像起始 (0x4000_0000), 栈向低地址增长,
-     * 因此将 SP 设为 _start, 即栈位于代码段之前的空间。
+     * 使能 FP/SIMD (浮点和 NEON) 访问。
      *
-     * 在 QEMU virt 中, 0x4000_0000 之前是大量可用 RAM,
-     * 栈从此处向下增长足够安全 (后续章节会建立正式内存管理)。
+     * CPACR_EL1.FPEN (bits[21:20]):
+     *   0b00 = 陷入 EL1 (默认, 禁止访问)
+     *   0b11 = EL0 和 EL1 均可访问
      *
-     * 参考: [ARM-ARM] D1.8.2 "栈指针选择"
+     * GCC -O2 可能生成 NEON 指令 (如 memset 使用 SIMD),
+     * 如果 FPEN 未设置则触发 EC=0x07 陷入。
+     *
+     * 参考: [ARM-ARM] D13.2.20 "CPACR_EL1, Architectural Feature Access Control Register"
      * ---------------------------------------------------------- */
-    ldr     x0, =_start            // x0 = _start 的链接地址
-    mov     sp, x0                 // SP = _start (栈向下增长)
+    mrs     x0, cpacr_el1          // 读取当前 CPACR_EL1
+    orr     x0, x0, #(3 << 20)    // FPEN = 0b11 → 允许 FP/SIMD 访问
+    msr     cpacr_el1, x0          // 写回 CPACR_EL1
+    isb                            // 指令同步屏障: 确保新设置立即生效
+
+    /* ----------------------------------------------------------
+     * 设置栈指针 SP_EL1。
+     *
+     * ARM64 栈向低地址增长 (full-descending)。SP 必须指向
+     * 已分配内存区域的顶部 (最高地址)。
+     *
+     * boot_stack_top 是 .bss 段中 16KB 启动栈的顶部。
+     * 注意: QEMU virt 的 RAM 从 0x4000_0000 开始,
+     * 不可将 SP 设为 0x4000_0000 (向下增长会访问 RAM 之外!)。
+     *
+     * 参考: [ARM-ARM] D1.8.2 "Stack Pointer selection"
+     *        [ARM-ABI] AAPCS64 "6.2.2 The Stack"
+     * ---------------------------------------------------------- */
+    ldr     x0, =boot_stack_top    // x0 = 启动栈顶部地址 (在 BSS 段中)
+    mov     sp, x0                 // SP = 栈顶 (向下增长)
 
     /* ----------------------------------------------------------
      * 清零 BSS 段: C 语言规范要求未初始化的全局/静态变量为 0。
@@ -150,3 +170,25 @@ bss_loop:
 halt:
     wfe                            // 等待事件 (低功耗)
     b       halt                   // 永远循环
+
+/* ==================================================================
+ * 启动栈 — 在 .bss 段中分配 16KB
+ *
+ * ARM64 栈为 full-descending: SP 初始指向 boot_stack_top,
+ * 每次 push (如 stp) 先减小 SP 再写入。
+ * 因此 boot_stack 是最低地址, boot_stack_top 是最高地址。
+ *
+ * 大小 16KB (4 页) 对于启动阶段足够:
+ *   - kernel_main() 调用链深度有限
+ *   - 后续各进程会分配独立的内核栈
+ *
+ * .align 4 = 16 字节对齐 (2^4 = 16), 满足 AAPCS64 要求:
+ *   "SP 在公共接口处必须 16 字节对齐"
+ *
+ * 参考: [ARM-ABI] AAPCS64 "6.2.2 The Stack" — SP 16-byte alignment
+ * ================================================================== */
+.section .bss
+.align 4                           // 16 字节对齐 (2^4)
+boot_stack:
+    .space 16384                   // 16KB = 4 pages
+boot_stack_top:

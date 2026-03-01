@@ -85,7 +85,13 @@ void kernel_main(void)
     proc_init();
     uart_puts("\n");
 
-    /* 步骤 6: 创建用户态测试进程并调度运行 */
+    /* 步骤 11: 为 RAM 启用 EL0 访问权限
+     * 在进入用户态之前, 修改页表允许 EL0 访问 RAM。
+     * 必须在 MMU 使能后调用 (修改页表 + 刷 TLB)。 */
+    mmu_enable_user_access();
+    uart_puts("\n");
+
+    /* 步骤 12: 创建用户态测试进程并调度运行 */
     uart_puts("[boot] Creating user process...\n");
     extern void user_entry(void);       /* user/user_prog.c 中定义 */
     proc_create(user_entry);

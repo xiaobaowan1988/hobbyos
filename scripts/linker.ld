@@ -77,6 +77,7 @@ SECTIONS
      * 参考: [LD-MANUAL] "3.6 SECTIONS Command"
      * ---------------------------------------------------------- */
     .data : ALIGN(4096) {
+        __data_start = .;          /* 导出 .data 起始地址 (MMU 权限分界) */
         *(.data .data.*)           /* 匹配所有 .data 段 */
     }
 

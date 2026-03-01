@@ -7,6 +7,12 @@
  * 异常向量表必须按 2048 字节 (0x800) 对齐, 表中共 16 个入口,
  * 每个入口占 128 字节 (0x80, 可容纳 32 条指令)。
  *
+ * 重要: SAVE_REGS 需要 20 条指令 (80 字节), RESTORE_REGS 也需要
+ * 20 条指令 (80 字节), 加上中间的 3 条指令和 eret, 合计 176 字节,
+ * 超过 128 字节限制! 因此每个向量入口只放 SAVE_REGS + 参数设置
+ * + 跳转 (92 字节 < 128 字节), 实际的 C 函数调用和 RESTORE_REGS
+ * 放在表外的 vector_common 中。
+ *
  * 参考文档:
  *   [ARM-ARM] ARM Architecture Reference Manual ARMv8-A (DDI 0487)
  *   [ARM-ARM] D1.10 "异常向量表"
@@ -28,81 +34,63 @@
  *    SP+0x100: ELR_EL1
  *    SP+0x108: SPSR_EL1
  *
+ *  共 20 条指令 = 80 字节 (0x50)
+ *
  *  参考: [ARM-ARM] C6.2.27  "STP, Store Pair of Registers"
  *         [ARM-ARM] D13.2.37 "ELR_EL1, Exception Link Register"
  *         [ARM-ARM] C5.2.18  "SPSR_EL1, Saved Program Status Register"
  * ================================================================ */
 .macro SAVE_REGS
-    /* 预留 272 字节栈空间 (34 个 8 字节槽位)
-     * SP 必须保持 16 字节对齐 (ARM64 ABI 要求)
-     * 参考: [ARM-ARM] D1.8.2 "栈对齐" */
     sub     sp, sp, #272
-
-    /* 保存通用寄存器 x0-x30 (成对存储, 每对 16 字节)
-     * STP: Store Pair — 一条指令存储两个 64 位寄存器
-     * 参考: [ARM-ARM] C6.2.27 "STP" */
-    stp     x0,  x1,  [sp, #0x00]   /* 保存 x0, x1  到 [SP+0x00]  */
-    stp     x2,  x3,  [sp, #0x10]   /* 保存 x2, x3  到 [SP+0x10]  */
-    stp     x4,  x5,  [sp, #0x20]   /* 保存 x4, x5  到 [SP+0x20]  */
-    stp     x6,  x7,  [sp, #0x30]   /* 保存 x6, x7  到 [SP+0x30]  */
-    stp     x8,  x9,  [sp, #0x40]   /* 保存 x8, x9  到 [SP+0x40]  */
-    stp     x10, x11, [sp, #0x50]   /* 保存 x10, x11 到 [SP+0x50] */
-    stp     x12, x13, [sp, #0x60]   /* 保存 x12, x13 到 [SP+0x60] */
-    stp     x14, x15, [sp, #0x70]   /* 保存 x14, x15 到 [SP+0x70] */
-    stp     x16, x17, [sp, #0x80]   /* 保存 x16, x17 到 [SP+0x80] */
-    stp     x18, x19, [sp, #0x90]   /* 保存 x18, x19 到 [SP+0x90] */
-    stp     x20, x21, [sp, #0xA0]   /* 保存 x20, x21 到 [SP+0xA0] */
-    stp     x22, x23, [sp, #0xB0]   /* 保存 x22, x23 到 [SP+0xB0] */
-    stp     x24, x25, [sp, #0xC0]   /* 保存 x24, x25 到 [SP+0xC0] */
-    stp     x26, x27, [sp, #0xD0]   /* 保存 x26, x27 到 [SP+0xD0] */
-    stp     x28, x29, [sp, #0xE0]   /* 保存 x28, x29 到 [SP+0xE0] */
-    str     x30,      [sp, #0xF0]   /* 保存 x30 (LR) 到 [SP+0xF0] */
-
-    /* 保存异常状态寄存器:
-     * ELR_EL1 — 异常发生时的 PC (返回地址)
-     * SPSR_EL1 — 异常发生时的 PSTATE (处理器状态)
-     * 参考: [ARM-ARM] D13.2.37 "ELR_EL1"
-     *        [ARM-ARM] C5.2.18  "SPSR_EL1" */
-    mrs     x0, elr_el1              /* 读取异常返回地址 */
-    mrs     x1, spsr_el1             /* 读取保存的处理器状态 */
-    stp     x0, x1, [sp, #0x100]     /* 保存到栈帧末尾 */
+    stp     x0,  x1,  [sp, #0x00]
+    stp     x2,  x3,  [sp, #0x10]
+    stp     x4,  x5,  [sp, #0x20]
+    stp     x6,  x7,  [sp, #0x30]
+    stp     x8,  x9,  [sp, #0x40]
+    stp     x10, x11, [sp, #0x50]
+    stp     x12, x13, [sp, #0x60]
+    stp     x14, x15, [sp, #0x70]
+    stp     x16, x17, [sp, #0x80]
+    stp     x18, x19, [sp, #0x90]
+    stp     x20, x21, [sp, #0xA0]
+    stp     x22, x23, [sp, #0xB0]
+    stp     x24, x25, [sp, #0xC0]
+    stp     x26, x27, [sp, #0xD0]
+    stp     x28, x29, [sp, #0xE0]
+    str     x30,      [sp, #0xF0]
+    mrs     x0, elr_el1
+    mrs     x1, spsr_el1
+    stp     x0, x1, [sp, #0x100]
 .endm
 
 /* ================================================================
  *  宏: RESTORE_REGS — 从栈上恢复所有通用寄存器
  *
  *  与 SAVE_REGS 相反, 在异常处理完成后恢复现场。
+ *  共 20 条指令 = 80 字节 (0x50)
  *
  *  参考: [ARM-ARM] C6.2.11 "LDP, Load Pair of Registers"
  * ================================================================ */
 .macro RESTORE_REGS
-    /* 恢复 ELR_EL1 和 SPSR_EL1
-     * 参考: [ARM-ARM] D13.2.37, C5.2.18 */
-    ldp     x0, x1, [sp, #0x100]     /* 从栈帧末尾加载 */
-    msr     elr_el1, x0              /* 恢复异常返回地址 */
-    msr     spsr_el1, x1             /* 恢复处理器状态 */
-
-    /* 恢复通用寄存器 x0-x30
-     * LDP: Load Pair — 一条指令加载两个 64 位寄存器
-     * 参考: [ARM-ARM] C6.2.11 "LDP" */
-    ldp     x0,  x1,  [sp, #0x00]   /* 恢复 x0, x1  */
-    ldp     x2,  x3,  [sp, #0x10]   /* 恢复 x2, x3  */
-    ldp     x4,  x5,  [sp, #0x20]   /* 恢复 x4, x5  */
-    ldp     x6,  x7,  [sp, #0x30]   /* 恢复 x6, x7  */
-    ldp     x8,  x9,  [sp, #0x40]   /* 恢复 x8, x9  */
-    ldp     x10, x11, [sp, #0x50]   /* 恢复 x10, x11 */
-    ldp     x12, x13, [sp, #0x60]   /* 恢复 x12, x13 */
-    ldp     x14, x15, [sp, #0x70]   /* 恢复 x14, x15 */
-    ldp     x16, x17, [sp, #0x80]   /* 恢复 x16, x17 */
-    ldp     x18, x19, [sp, #0x90]   /* 恢复 x18, x19 */
-    ldp     x20, x21, [sp, #0xA0]   /* 恢复 x20, x21 */
-    ldp     x22, x23, [sp, #0xB0]   /* 恢复 x22, x23 */
-    ldp     x24, x25, [sp, #0xC0]   /* 恢复 x24, x25 */
-    ldp     x26, x27, [sp, #0xD0]   /* 恢复 x26, x27 */
-    ldp     x28, x29, [sp, #0xE0]   /* 恢复 x28, x29 */
-    ldr     x30,      [sp, #0xF0]   /* 恢复 x30 (LR) */
-
-    /* 释放栈空间 */
+    ldp     x0, x1, [sp, #0x100]
+    msr     elr_el1, x0
+    msr     spsr_el1, x1
+    ldp     x0,  x1,  [sp, #0x00]
+    ldp     x2,  x3,  [sp, #0x10]
+    ldp     x4,  x5,  [sp, #0x20]
+    ldp     x6,  x7,  [sp, #0x30]
+    ldp     x8,  x9,  [sp, #0x40]
+    ldp     x10, x11, [sp, #0x50]
+    ldp     x12, x13, [sp, #0x60]
+    ldp     x14, x15, [sp, #0x70]
+    ldp     x16, x17, [sp, #0x80]
+    ldp     x18, x19, [sp, #0x90]
+    ldp     x20, x21, [sp, #0xA0]
+    ldp     x22, x23, [sp, #0xB0]
+    ldp     x24, x25, [sp, #0xC0]
+    ldp     x26, x27, [sp, #0xD0]
+    ldp     x28, x29, [sp, #0xE0]
+    ldr     x30,      [sp, #0xF0]
     add     sp, sp, #272
 .endm
 
@@ -111,26 +99,28 @@
  *
  *  每个向量入口占 128 字节 (0x80)。此宏会:
  *    1. 对齐到 0x80 边界
- *    2. 保存寄存器
+ *    2. 保存寄存器 (20 条指令 = 80 字节)
  *    3. 设置 C 函数参数 (x0 = exception_type, x1 = SP = 寄存器帧指针)
- *    4. 调用 C 异常处理函数 exception_handler()
- *    5. 恢复寄存器
- *    6. 执行 ERET 返回
+ *    4. 跳转到 vector_common (表外的共享处理代码)
+ *
+ *  合计: 20 + 3 = 23 条指令 = 92 字节 < 128 字节 ✓
+ *
+ *  vector_common 负责:
+ *    - 调用 C 异常处理函数 exception_handler()
+ *    - 恢复寄存器 (RESTORE_REGS)
+ *    - 执行 ERET 返回
  *
  *  参数:
  *    type — 异常类型编号, 传给 C 处理函数以区分异常来源
  *
  *  参考: [ARM-ARM] D1.10 "Exception vector table"
- *         [ARM-ARM] C6.2.1 "ERET"
  * ================================================================== */
 .macro VECTOR_ENTRY type
     .balign 0x80                     /* 对齐到 128 字节边界 */
-    SAVE_REGS                        /* 保存所有寄存器到栈 */
-    mov     x0, #\type               /* x0 = 异常类型编号 (C 函数第一参数) */
-    mov     x1, sp                   /* x1 = 寄存器帧指针 (C 函数第二参数) */
-    bl      exception_handler        /* 调用 C 异常处理函数 */
-    RESTORE_REGS                     /* 恢复所有寄存器 */
-    eret                             /* 异常返回 (恢复 PC 和 PSTATE) */
+    SAVE_REGS                        /* 保存所有寄存器到栈 (80 字节) */
+    mov     x0, #\type               /* x0 = 异常类型编号 (4 字节) */
+    mov     x1, sp                   /* x1 = 寄存器帧指针 (4 字节) */
+    b       vector_common            /* 跳转到共享处理代码 (4 字节) */
 .endm
 
 /* ==================================================================
@@ -196,3 +186,21 @@ exception_vector_table:
     VECTOR_ENTRY 13                  /* 0x680: IRQ,     低EL, AArch32 */
     VECTOR_ENTRY 14                  /* 0x700: FIQ,     低EL, AArch32 */
     VECTOR_ENTRY 15                  /* 0x780: SError,  低EL, AArch32 */
+
+/* ==================================================================
+ *  vector_common — 共享的异常处理尾部
+ *
+ *  所有 16 个向量入口在完成 SAVE_REGS 和参数设置后,
+ *  都跳转到这里。此代码位于向量表之外, 没有大小限制。
+ *
+ *  流程:
+ *    1. bl exception_handler  — 调用 C 异常处理函数
+ *    2. RESTORE_REGS          — 恢复所有寄存器
+ *    3. eret                  — 异常返回 (恢复 PC 和 PSTATE)
+ *
+ *  参考: [ARM-ARM] C6.2.1 "ERET, Exception Return"
+ * ================================================================== */
+vector_common:
+    bl      exception_handler        /* 调用 C 异常处理函数 */
+    RESTORE_REGS                     /* 恢复所有寄存器 */
+    eret                             /* 异常返回 (恢复 PC 和 PSTATE) */
