@@ -123,6 +123,20 @@ bss_loop:
 3:
 
     /* ----------------------------------------------------------
+     * 设置异常向量表基地址 (VBAR_EL1)。
+     *
+     * VBAR_EL1 (Vector Base Address Register, EL1) 保存异常向量表
+     * 的基地址。当异常发生时, CPU 根据 VBAR_EL1 + 偏移 跳转到
+     * 对应的异常处理入口。
+     *
+     * exception_vector_table 在 boot/vectors.S 中定义。
+     *
+     * 参考: [ARM-ARM] D13.2.139 "VBAR_EL1, Vector Base Address Register (EL1)"
+     * ---------------------------------------------------------- */
+    ldr     x0, =exception_vector_table  // x0 = 异常向量表基地址
+    msr     vbar_el1, x0                 // 写入 VBAR_EL1
+
+    /* ----------------------------------------------------------
      * 跳转到 C 入口函数 kernel_main()。
      * 使用 bl 而非 b, 这样如果 kernel_main 返回可以捕获。
      *

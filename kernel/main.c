@@ -39,6 +39,7 @@ void kernel_main(void)
     uart_puts("[boot] BSS section zeroed\n");
     uart_puts("[boot] Stack pointer set\n");
     uart_puts("\n");
+    uart_puts("[boot] Exception vector table installed (VBAR_EL1)\n");
     uart_puts("[boot] Kernel boot complete. Halting.\n");
 
     /* 步骤 4: 内核主循环 — 当前无事可做, 进入无限循环。
