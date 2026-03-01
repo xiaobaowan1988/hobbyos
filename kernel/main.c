@@ -14,6 +14,7 @@
 #include "mmu.h"
 #include "gic.h"
 #include "timer.h"
+#include "pci.h"
 #include "proc.h"
 
 /* ==================================================================
@@ -63,7 +64,11 @@ void kernel_main(void)
     timer_init();
     uart_puts("\n");
 
-    /* 步骤 7: 初始化进程子系统 */
+    /* 步骤 7: 枚举 PCIe 总线 */
+    pci_init();
+    uart_puts("\n");
+
+    /* 步骤 8: 初始化进程子系统 */
     proc_init();
     uart_puts("\n");
 

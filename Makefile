@@ -77,7 +77,8 @@ C_SRC   := kernel/main.c \
            user/user_prog.c \
            drivers/uart.c \
            drivers/gic.c \
-           drivers/timer.c
+           drivers/timer.c \
+           drivers/pci.c
 OBJ     := $(ASM_SRC:.S=.o) $(C_SRC:.c=.o)
 
 # -------------------------------------------------------------------
