@@ -10,6 +10,7 @@
  */
 
 #include "uart.h"
+#include "mm.h"
 
 /* ==================================================================
  * kernel_main() — 内核主函数
@@ -40,7 +41,12 @@ void kernel_main(void)
     uart_puts("[boot] Stack pointer set\n");
     uart_puts("\n");
     uart_puts("[boot] Exception vector table installed (VBAR_EL1)\n");
-    uart_puts("[boot] Kernel boot complete. Halting.\n");
+    uart_puts("\n");
+
+    /* 步骤 3: 初始化物理内存管理器 */
+    pmm_init();
+
+    uart_puts("\n[boot] Kernel boot complete. Halting.\n");
 
     /* 步骤 4: 内核主循环 — 当前无事可做, 进入无限循环。
      * 使用 WFE (Wait For Event) 指令让 CPU 进入低功耗状态,
