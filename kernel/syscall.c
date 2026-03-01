@@ -18,6 +18,8 @@
 #include "syscall.h"
 #include "uart.h"
 #include "proc.h"
+#include "net.h"
+#include "netdef.h"
 
 /* ==================================================================
  * sys_putc() — 系统调用: 输出单个字符
@@ -90,6 +92,54 @@ static long sys_write(unsigned long fd, unsigned long buf, unsigned long len)
 }
 
 /* ==================================================================
+ * sys_net_send() — 系统调用: 通过 UDP 发送数据
+ *
+ * 这是用户态 send() 的内核实现。
+ * 完整路径: 用户态 SVC → 内核 syscall → UDP → IP → Ethernet → virtio-net → NIC
+ *
+ * 参数:
+ *   x0 — dst_ip (目标 IP, 主机字节序)
+ *   x1 — dst_port (目标端口)
+ *   x2 — buf (用户态数据缓冲区地址)
+ *   x3 — len (数据长度)
+ *
+ * 返回: 发送的字节数, 或 -1 错误
+ *
+ * 这就是用户流程图中:
+ *   EL0: send(socket_fd, "Hello World", 11, 0)
+ *     → SVC #0 → EL1
+ *     → 协议栈: 分配 sk_buff, 加 TCP/IP 头
+ *     → DMA 映射 → 写 Tx Ring → Doorbell → 网卡发送
+ * ================================================================== */
+static long sys_net_send(unsigned long dst_ip, unsigned long dst_port,
+                         unsigned long buf, unsigned long len)
+{
+    uart_puts("[syscall] sys_net_send: sending via UDP...\n");
+
+    /* 使用固定源端口 12345, 目标端口由用户指定 */
+    udp_send((uint32_t)dst_ip, 12345, (uint16_t)dst_port,
+             (const void *)buf, (uint32_t)len);
+
+    return (long)len;
+}
+
+/* ==================================================================
+ * sys_sock_send() — 系统调用: 通过 TCP socket 发送数据
+ *
+ * 参数:
+ *   x0 — socket 句柄 (由 tcp_connect 返回)
+ *   x1 — buf (数据缓冲区地址)
+ *   x2 — len (数据长度)
+ *
+ * 返回: 发送的字节数, 或 -1 错误
+ * ================================================================== */
+static long sys_sock_send(unsigned long sock, unsigned long buf,
+                          unsigned long len)
+{
+    return (long)tcp_send((int)sock, (const void *)buf, (uint32_t)len);
+}
+
+/* ==================================================================
  * 系统调用表 — 函数指针数组
  *
  * 以系统调用号为索引, 查找对应的处理函数。
@@ -102,10 +152,11 @@ typedef long (*syscall_fn_t)(unsigned long, unsigned long,
                              unsigned long, unsigned long);
 
 static syscall_fn_t syscall_table[NR_SYSCALLS] = {
-    [SYS_PUTC]  = (syscall_fn_t)sys_putc,    /* 0: 输出字符 */
-    [SYS_EXIT]  = (syscall_fn_t)sys_exit,     /* 1: 进程退出 */
-    [SYS_WRITE] = (syscall_fn_t)sys_write,    /* 2: 写数据 */
-    /* 其他槽位为 NULL (未实现的系统调用) */
+    [SYS_PUTC]      = (syscall_fn_t)sys_putc,       /* 0: 输出字符 */
+    [SYS_EXIT]      = (syscall_fn_t)sys_exit,        /* 1: 进程退出 */
+    [SYS_WRITE]     = (syscall_fn_t)sys_write,       /* 2: 写数据 */
+    [SYS_NET_SEND]  = (syscall_fn_t)sys_net_send,    /* 3: UDP 发送 */
+    [SYS_SOCK_SEND] = (syscall_fn_t)sys_sock_send,   /* 4: TCP 发送 */
 };
 
 /* ==================================================================

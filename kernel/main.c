@@ -17,6 +17,7 @@
 #include "pci.h"
 #include "virtio.h"
 #include "proc.h"
+#include "net.h"
 
 /* ==================================================================
  * kernel_main() — 内核主函数
@@ -73,7 +74,14 @@ void kernel_main(void)
     virtio_net_init();
     uart_puts("\n");
 
-    /* 步骤 9: 初始化进程子系统 */
+    /* 步骤 9: 初始化以太网/ARP 层
+     * eth_init() 从 virtio-net 驱动获取 MAC 地址,
+     * 设置本机 IP (10.0.2.2), 清空 ARP 缓存。
+     * 必须在 virtio_net_init() 之后调用。 */
+    eth_init();
+    uart_puts("\n");
+
+    /* 步骤 10: 初始化进程子系统 */
     proc_init();
     uart_puts("\n");
 
